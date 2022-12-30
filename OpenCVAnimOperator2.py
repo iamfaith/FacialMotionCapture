@@ -2,31 +2,206 @@ import bpy
 import cv2
 import time
 import numpy
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-# Download trained model (lbfmodel.yaml)
-# https://github.com/kurnianggoro/GSOC2017/tree/master/data
 
-# Install prerequisites:
+class FaceMeshBlock(nn.Module):
+    """This is the main building block for architecture
+    which is just residual block with one dw-conv and max-pool/channel pad
+    in the second branch if input channels doesn't match output channels"""
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, stride: int = 1):
+        super(FaceMeshBlock, self).__init__()
 
-# Linux: (may vary between distro's and installation methods)
-# This is for manjaro with Blender installed from the package manager
-# python3 -m ensurepip
-# python3 -m pip install --upgrade pip --user
-# python3 -m pip install opencv-contrib-python numpy --user
+        self.stride = stride
+        self.channel_pad = out_channels - in_channels
 
-# MacOS
-# open the Terminal
-# cd /Applications/Blender.app/Contents/Resources/2.81/python/bin
-# ./python3.7m -m ensurepip
-# ./python3.7m -m pip install --upgrade pip --user
-# ./python3.7m -m pip install opencv-contrib-python numpy --user
+        # TFLite uses slightly different padding than PyTorch 
+        # on the depthwise conv layer when the stride is 2.
+        if stride == 2:
+            self.max_pool = nn.MaxPool2d(kernel_size=stride, stride=stride)
+            padding = 0
+        else:
+            padding = (kernel_size - 1) // 2
 
-# Windows:
-# Open Command Prompt as Administrator
-# cd "C:\Program Files\Blender Foundation\Blender 2.81\2.81\python\bin"
-# D:\Blender 3.4\3.4\python\bin
-# python -m pip install --upgrade pip
-# python -m pip install opencv-contrib-python numpy
+        self.convs = nn.Sequential(
+            nn.Conv2d(in_channels=in_channels, out_channels=in_channels, 
+                      kernel_size=kernel_size, stride=stride, padding=padding, 
+                      groups=in_channels, bias=True),
+            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, 
+                      kernel_size=1, stride=1, padding=0, bias=True),
+        )
+
+        self.act = nn.PReLU(out_channels)
+
+    def forward(self, x):
+        if self.stride == 2:
+            h = F.pad(x, (0, 2, 0, 2), "constant", 0)
+            x = self.max_pool(x)
+        else:
+            h = x
+
+        if self.channel_pad > 0:
+            x = F.pad(x, (0, 0, 0, 0, 0, self.channel_pad), "constant", 0)
+        
+        return self.act(self.convs(h) + x)
+
+
+class FaceMesh(nn.Module):
+    """The FaceMesh face landmark model from MediaPipe.
+
+    Because we won't be training this model, it doesn't need to have
+    batchnorm layers. These have already been "folded" into the conv 
+    weights by TFLite.
+
+    The conversion to PyTorch is fairly straightforward, but there are 
+    some small differences between TFLite and PyTorch in how they handle
+    padding on conv layers with stride 2.
+
+    This version works on batches, while the MediaPipe version can only
+    handle a single image at a time.
+    """
+    def __init__(self):
+        super(FaceMesh, self).__init__()
+
+        self.num_coords = 468
+        self.x_scale = 192.0
+        self.y_scale = 192.0
+        self.min_score_thresh = 0.75
+
+        self._define_layers()
+
+    def _define_layers(self):
+        self.backbone = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=0, bias=True),
+            nn.PReLU(16),
+
+            FaceMeshBlock(16, 16),
+            FaceMeshBlock(16, 16),
+            FaceMeshBlock(16, 32, stride=2),
+            FaceMeshBlock(32, 32),
+            FaceMeshBlock(32, 32),
+            FaceMeshBlock(32, 64, stride=2),
+            FaceMeshBlock(64, 64),
+            FaceMeshBlock(64, 64),
+            FaceMeshBlock(64, 128, stride=2),
+            FaceMeshBlock(128, 128),
+            FaceMeshBlock(128, 128),
+            FaceMeshBlock(128, 128, stride=2),
+            FaceMeshBlock(128, 128),
+            FaceMeshBlock(128, 128),
+        )
+        
+        self.coord_head = nn.Sequential(
+            FaceMeshBlock(128, 128, stride=2),
+            FaceMeshBlock(128, 128),
+            FaceMeshBlock(128, 128),
+            nn.Conv2d(128, 32, 1),
+            nn.PReLU(32),
+            FaceMeshBlock(32, 32),
+            nn.Conv2d(32, 1404, 3)
+        )
+        
+        self.conf_head = nn.Sequential(
+            FaceMeshBlock(128, 128, stride=2),
+            nn.Conv2d(128, 32, 1),
+            nn.PReLU(32),
+            FaceMeshBlock(32, 32),
+            nn.Conv2d(32, 1, 3)
+        )
+        
+    def forward(self, x):
+        # TFLite uses slightly different padding on the first conv layer
+        # than PyTorch, so do it manually.
+        x = nn.ReflectionPad2d((1, 0, 1, 0))(x)
+        # x = nn.ConstantPad2d((0, 1, 0, 1), 0)(x)
+        b = x.shape[0]      # batch size, needed for reshaping later
+
+        x = self.backbone(x)            # (b, 128, 6, 6)
+        
+        c = self.conf_head(x)           # (b, 1, 1, 1)
+        c = c.view(b, -1)               # (b, 1)
+        
+        r = self.coord_head(x)          # (b, 1404, 1, 1)
+        r = r.reshape(b, -1)            # (b, 1404)
+        
+        return [r, c]
+
+    def _device(self):
+        """Which device (CPU or GPU) is being used by this model?"""
+        return self.conf_head[1].weight.device
+    
+    def load_weights(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()        
+    
+    def _preprocess(self, x):
+        """Converts the image pixels to the range [-1, 1]."""
+        return x.float() / 127.5 - 1.0
+
+    def predict_on_image(self, img):
+        """Makes a prediction on a single image.
+
+        Arguments:
+            img: a NumPy array of shape (H, W, 3) or a PyTorch tensor of
+                 shape (3, H, W). The image's height and width should be 
+                 128 pixels.
+
+        Returns:
+            A tensor with face detections.
+        """
+        if isinstance(img, np.ndarray):
+            img = torch.from_numpy(img).permute((2, 0, 1))
+
+        return self.predict_on_batch(img.unsqueeze(0))[0]
+
+    def predict_on_batch(self, x):
+        """Makes a prediction on a batch of images.
+
+        Arguments:
+            x: a NumPy array of shape (b, H, W, 3) or a PyTorch tensor of
+               shape (b, 3, H, W). The height and width should be 128 pixels.
+
+        Returns:
+            A list containing a tensor of face detections for each image in 
+            the batch. If no faces are found for an image, returns a tensor
+            of shape (0, 17).
+
+        Each face detection is a PyTorch tensor consisting of 17 numbers:
+            - ymin, xmin, ymax, xmax
+            - x,y-coordinates for the 6 keypoints
+            - confidence score
+        """
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).permute((0, 3, 1, 2))
+
+        assert x.shape[1] == 3
+        assert x.shape[2] == 192
+        assert x.shape[3] == 192
+
+        # 1. Preprocess the images into tensors:
+        x = x.to(self._device())
+        x = self._preprocess(x)
+
+        # 2. Run the neural network:
+        with torch.no_grad():
+            out = self.__call__(x)
+
+        # 3. Postprocess the raw predictions:
+        detections, confidences = out
+        detections[0:-1:3] *= self.x_scale
+        detections[1:-1:3] *= self.y_scale
+
+        return detections.view(-1, 3), confidences
+
+#New Add
+landmark_points_68 = [162,234,93,58,172,136,149,148,152,377,378,365,397,288,323,454,389,71,63,105,66,107,336,
+                296,334,293,301,168,197,5,4,75,97,2,326,305,33,160,158,133,153,144,362,385,387,263,373,
+                380,61,39,37,0,267,269,291,405,314,17,84,181,78,82,13,312,308,317,14,87]
+gap = 50
+# D:\blender3.4\blender-launcher.exe --python-use-system-env
 
 class OpenCVAnimOperator(bpy.types.Operator):
     """Operator which runs its self from a timer"""
@@ -37,11 +212,11 @@ class OpenCVAnimOperator(bpy.types.Operator):
     face_detect_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     #landmark_model_path = "/home/username/Documents/Vincent/lbfmodel.yaml"  #Linux
     #landmark_model_path = "/Users/username/Downloads/lbfmodel.yaml"         #Mac
-    landmark_model_path = "D:/vscode_workspace/GSOC2017-master/data/lbfmodel.yaml"   #Windows
+
+    net = FaceMesh().to("cpu")
+    net.load_weights("D:/vscode_workspace/FacialMotionCapture_v2/facemesh.pth")
     
-    # Load models
-    fm = cv2.face.createFacemarkLBF()
-    fm.loadModel(landmark_model_path)
+    
     cas = cv2.CascadeClassifier(face_detect_path)
     
     _timer = None
@@ -109,12 +284,15 @@ class OpenCVAnimOperator(bpy.types.Operator):
             ret, image = self._cap.read()
             if not ret:
                 return {'PASS_THROUGH'}
+
             ##################################################### added by resized 
-            scale_percent = 30 # percent of original size
-            width = int(image.shape[1] * scale_percent / 100)
-            height = int(image.shape[0] * scale_percent / 100)
-            dim = (width, height)
-            image = cv2.resize(image, dim) #, interpolation = cv2.INTER_AREA)
+            # scale_percent = 30 # percent of original size
+            # width = int(image.shape[1] * scale_percent / 100)
+            # height = int(image.shape[0] * scale_percent / 100)
+            # dim = (width, height)
+            # image = cv2.resize(image, dim) #, interpolation = cv2.INTER_AREA)
+            
+            
             #gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             #gray = cv2.equalizeHist(gray)
             
@@ -132,11 +310,29 @@ class OpenCVAnimOperator(bpy.types.Operator):
                     if face[2] > biggestFace[0][2]:
                         print(face)
                         biggestFace[0] = face
-         
+
+                for rect in biggestFace:
+                    x,y,w,h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
+                    # cv.rectangle(frame, (x,y), (x+w,y+h), (255,0,0), 1)
+                    # x -= gap
+                    # y -= gap
+                    
+                    # w += gap
+                    h += 9 * gap
+                    h = int(h)
+                    
+                    cropped_image = image[y:y+h, x:x+w]
+            
+                    img = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+                    img = cv2.resize(img, (192, 192))
+                    detections = self.net.predict_on_image(img).numpy()
+
+                    shape = detections[landmark_points_68, :2]
+                    # for x1, y1 in zip(x, y):  
                 # find the landmarks.
-                _, landmarks = self.fm.fit(image, faces=biggestFace)
-                for mark in landmarks:
-                    shape = mark[0]
+                # _, landmarks = self.fm.fit(image, faces=biggestFace)
+                # for mark in landmarks:
+                #     shape = mark[0]
                     
                     #2D image points. If you change the image, you need to change vector
                     image_points = numpy.array([shape[30],     # Nose tip - 31
@@ -199,7 +395,7 @@ class OpenCVAnimOperator(bpy.types.Operator):
                     bones["eyelid_low_ctrl_R"].keyframe_insert(data_path="location", index=2)
                     bones["eyelid_up_ctrl_L"].keyframe_insert(data_path="location", index=2)
                     bones["eyelid_low_ctrl_L"].keyframe_insert(data_path="location", index=2)
-
+            
             ########################## not debug                    
             #         # draw face markers
             #         for (x, y) in shape:
