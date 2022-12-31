@@ -397,24 +397,26 @@ class OpenCVAnimOperator(bpy.types.Operator):
                     bones["eyelid_low_ctrl_L"].keyframe_insert(data_path="location", index=2)
             
             ########################## not debug                    
-            #         # draw face markers
-            #         for (x, y) in shape:
-            #             cv2.circle(image, (int(x), int(y)), 2, (0, 255, 255), -1)
+                    # draw face markers
+                    for (x, y) in shape:
+                        cv2.circle(image, (int(x), int(y)), 2, (0, 255, 255), -1)
             
-            # # draw detected face
+            # draw detected face
             # for (x,y,w,h) in faces:
             #     cv2.rectangle(image,(x,y),(x+w,y+h),(255,0,0),1)
             
-            # # Show camera image in a window                     
-            # cv2.imshow("Output", image)
-            # cv2.waitKey(1)
+            # Show camera image in a window                     
+            cv2.imshow("Output", image)
+            if(cv2.waitKey(1) & 0xFF == ord('q')):
+                self.cancel(context)
+                return {'CANCELLED'}
 
         return {'PASS_THROUGH'}
     
     def init_camera(self):
         if self._cap == None:
-            # self._cap = cv2.VideoCapture(0)
-            self._cap = cv2.VideoCapture("D:/vscode_workspace/FacialMotionCapture_v2/0.mp4")
+            self._cap = cv2.VideoCapture(0)
+            # self._cap = cv2.VideoCapture("D:/vscode_workspace/FacialMotionCapture_v2/0.mp4")
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
