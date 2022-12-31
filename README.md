@@ -31,3 +31,20 @@ Open the script and change the folder for lbfmodel.yaml to the folder that you d
 
 Then run "python3 Test.py"
 
+
+```
+# CLONE & Install fork of Pyrender
+git clone https://github.com/aelzeiny/pyrender
+
+git clone git@github.com:iamfaith/pyrender.git
+cd pyrender
+git checkout morph-targets
+python -m pip install -e .
+
+if install failed:
+python -m pip uninstall enum34
+
+cd ..
+```
+
+
