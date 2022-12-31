@@ -15,10 +15,10 @@ mp_face_mesh = mp.solutions.face_mesh
 
 
 # Draw the face mesh annotations on the image.
-def Show_Frame_Landmarks(image,results):
+def Show_Frame_Landmarks(image,results, draw_face=False):
     image.flags.writeable = True
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    if results.multi_face_landmarks:
+    if results.multi_face_landmarks and draw_face:
         for face_landmarks in results.multi_face_landmarks:
             mp_drawing.draw_landmarks(
                 image=image,
@@ -45,7 +45,7 @@ def Show_Frame_Landmarks(image,results):
     cv2.imshow('MediaPipe Face Mesh', cv2.flip(image, 1))
     return image
 
-def Calculate_Face_Mocap(path=None,debug=False):
+def Calculate_Face_Mocap(path=None,debug=False, draw_face=False):
     # For webcam input:
     drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
     if path is None:
@@ -187,7 +187,8 @@ def Calculate_Face_Mocap(path=None,debug=False):
                     frame = cap.get(cv2.CAP_PROP_POS_FRAMES)
                     currentTime = cap.get(cv2.CAP_PROP_POS_MSEC)
                     json_data = {
-                        "blendShapes" : face_data.get_all_blendshapes(),
+                        # "blendShapes" : face_data.get_all_blendshapes(),
+                        "blendShapes" : face_data.get_all_blendshapes_dict(),
                         "frame" : frame,
                         "time" : currentTime
                     }
@@ -195,9 +196,9 @@ def Calculate_Face_Mocap(path=None,debug=False):
                     yield json_data
 
             if debug:
-                image = Show_Frame_Landmarks(image,results)
+                image = Show_Frame_Landmarks(image,results, draw_face=draw_face)
                 result.write(image)
-            if cv2.waitKey(5) & 0xFF == 27:
+            if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     cap.release()
 
@@ -351,8 +352,7 @@ def face_holistic(video_path,debug=False):
 
 
 if __name__ == '__main__':
-    print("dd")
-    path = "/Users/faith/Downloads/mocap4face-0.5.1/js-example/public/m4f.mp4"
+    path = "C:/Users/faith/Downloads/mocap4face-0.5.1/js-example/public/m4f.mp4"
     for i in Calculate_Face_Mocap(path,True):
         for idx, blend in enumerate(i["blendShapes"]):
             print(idx, blend)

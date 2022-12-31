@@ -117,6 +117,15 @@ class FaceData:
         """
         return self._blend_shapes
 
+    def get_all_blendshapes_dict(self) -> dict:
+        d = {}
+        for index in FaceBlendShape:
+            # print(index.name, index.value)
+            d[index.name] = self.get_blendshape(index)
+        return d
+        
+        
+
     def set_blendshape(self, index: FaceBlendShape, value: float,
                        no_filter: bool = False, default = True) -> None:
         """ Sets the value of the blendshape.

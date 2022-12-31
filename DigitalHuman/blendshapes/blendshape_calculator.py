@@ -82,7 +82,7 @@ class BlendshapeCalculator():
     def _remap(self, value, min, max):
         return (np.clip(value, min, max) - min) / (max - min)
 
-    def _remap_blendshape(self, index: FaceBlendShape, value: float, default=True):
+    def _remap_blendshape(self, index: FaceBlendShape, value: float, default=False):
         if default:
             min, max  = 0, 1.0
         else:
@@ -270,7 +270,7 @@ class BlendshapeCalculator():
         self._face_data.set_blendshape(
             FaceBlendShape.MouthRight, mouth_right)
 
-        print(mouth_left)
+        # print(mouth_left)
 
         # self._live_link_face.set_blendshape(ARKitFace.MouthRight, 1 - remap(mouth_left_right, -1.5, 0.0))
         #-------------------------------------------------------

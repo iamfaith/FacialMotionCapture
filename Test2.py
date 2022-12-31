@@ -3,11 +3,29 @@ import cv2 as cv
 import time
 import matplotlib.pyplot as plt
 # OpenCV Facial Capture Test 
+# import asyncio
+# import winsdk.windows.devices.enumeration as windows_devices
 
-# _cap = cv.VideoCapture(0)
+
+# CAMERA_NAME = "Dino-Lite Premier"
+
+# async def get_camera_info():
+#     return await windows_devices.DeviceInformation.find_all_async(4)
+
+# connected_cameras = asyncio.run(get_camera_info())
+# names = [camera.name for camera in connected_cameras]
+
+# if CAMERA_NAME not in names:
+#     print("Camera not found")
+# else:
+#     camera_index = names.index(CAMERA_NAME)
+#     print(camera_index)
+    
+    
+_cap = cv.VideoCapture(0)
 # _cap = cv.VideoCapture("C:/Users/faith/Documents/Captura/output.mp4")
 # _cap = cv.VideoCapture("a.mp4")
-_cap = cv.VideoCapture("0.mp4")
+# _cap = cv.VideoCapture("0.mp4")
 _cap.set(cv.CAP_PROP_FRAME_WIDTH, 512)
 _cap.set(cv.CAP_PROP_FRAME_HEIGHT, 512)
 _cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
