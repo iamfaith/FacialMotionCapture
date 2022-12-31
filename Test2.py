@@ -16,7 +16,7 @@ time.sleep(0.5)
 
 from facemesh import FaceMesh
 
-net = FaceMesh().to("cpu")
+net = FaceMesh().to("cuda")
 net.load_weights("D:/vscode_workspace/FacialMotionCapture_v2/facemesh.pth")
 
 # cascade = cv.CascadeClassifier(cv.data.haarcascades + "haarcascade_frontalface_alt.xml")
@@ -30,7 +30,7 @@ landmark_points_68 = [162,234,93,58,172,136,149,148,152,377,378,365,397,288,323,
                 296,334,293,301,168,197,5,4,75,97,2,326,305,33,160,158,133,153,144,362,385,387,263,373,
                 380,61,39,37,0,267,269,291,405,314,17,84,181,78,82,13,312,308,317,14,87]
 
-gap = 50
+gap = 30
 while True:
     ret, frame = _cap.read()
     if not ret:
@@ -71,7 +71,7 @@ while True:
     
             img = cv.cvtColor(cropped_image, cv.COLOR_BGR2RGB)
             img = cv.resize(img, (192, 192))
-            detections = net.predict_on_image(img).numpy()
+            detections = net.predict_on_image(img).cpu().numpy()
 
 
 
