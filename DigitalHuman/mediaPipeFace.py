@@ -15,7 +15,7 @@ mp_face_mesh = mp.solutions.face_mesh
 
 
 # Draw the face mesh annotations on the image.
-def Show_Frame_Landmarks(image,results, draw_face=False):
+def Show_Frame_Landmarks(image,results, draw_face=False, scale=100):
     image.flags.writeable = True
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if results.multi_face_landmarks and draw_face:
@@ -42,6 +42,14 @@ def Show_Frame_Landmarks(image,results, draw_face=False):
                 connection_drawing_spec=mp_drawing_styles
                     .get_default_face_mesh_iris_connections_style())
     # Flip the image horizontally for a selfie-view display.
+    
+    scale_percent = scale # percent of original size
+    width = int(image.shape[1] * scale_percent / 100)
+    height = int(image.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    image = cv2.resize(image, dim) #, interpolation = cv2.INTER_AREA)
+    
+    
     cv2.imshow('MediaPipe Face Mesh', cv2.flip(image, 1))
     return image
 
