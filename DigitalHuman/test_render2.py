@@ -104,12 +104,11 @@ Livelink.face_blend_shapes_values = np.array([1.0, 0.49640795588493347, 0.116880
 
 def update_face():
     time.sleep(1)
-    print("---", "start!!!!!!!!!!!!")
     
     path = "C:/Users/faith/Downloads/mocap4face-0.5.1/js-example/public/m4f.mp4"
     # path = "C:/Users/faith/Documents/Captura/output.mp4"
     # path = None
-    for i in Calculate_Face_Mocap(path, debug=True):
+    for i in Calculate_Face_Mocap(path, debug=True, draw_face=True):
         # for idx, blend in enumerate(i["blendShapes"]):
             # pass
         # print(len(mesh.weights), len(i["blendShapes"]))
